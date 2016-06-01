@@ -41,6 +41,7 @@ int adc_key_in  = 0;
 int photocellPin = 1;
 int photocellReading;
 int relayPin = 2;
+int waterFlowPin = 3;
 bool ledOn = false;
 int currentBrightness = 0;
 int lightLowThres = 700;
@@ -49,6 +50,8 @@ int lightHighThres = 800;
 int currentMode = 0;
 int currentDisplay = 0;
 int currentSet = 0;
+int total_pulses = 0;
+volatile int pulse;
 
 // read the buttons
 int read_LCD_buttons()
@@ -79,11 +82,13 @@ void ledSwitch()
 
 void lightDisplay()
 {
+  if(currentDisplay != displayLight) { return; }
+  
   lcd.setCursor(0,0);
   if(currentSet == setLow){
     lcd.print("Low>");
-    if(lcd_key == btnUP) { lightLowThres = lightLowThres + 1; }
-    if(lcd_key == btnDOWN) { lightLowThres = lightLowThres - 1; }
+    if(lcd_key == btnUP) { lightLowThres++; }
+    if(lcd_key == btnDOWN) { lightLowThres--; }
   }
   else {
     lcd.print("Low ");
@@ -94,8 +99,8 @@ void lightDisplay()
   lcd.setCursor(8,0);
   if(currentSet == setHigh){
     lcd.print("High>");
-    if(lcd_key == btnUP) { lightHighThres = lightHighThres + 1; }
-    if(lcd_key == btnDOWN) { lightHighThres = lightHighThres - 1; }
+    if(lcd_key == btnUP) { lightHighThres++; }
+    if(lcd_key == btnDOWN) { lightHighThres--; }
   }
   else {
     lcd.print("High ");
@@ -109,8 +114,35 @@ void lightDisplay()
   lcd.print(photocellReading);
 }
 
+void waterDisplay()
+{
+  if(currentDisplay != displayWater) { return; }
+
+  pulse = 0;
+
+  interrupts();
+  delay(1000);
+  noInterrupts();
+  total_pulses += pulse;
+  lcd.setCursor(0,0);
+  lcd.print("Water flow      ");
+  lcd.setCursor(0,1);
+  lcd.print("Total: ");
+  lcd.print(total_pulses/450);
+  lcd.print("   L");
+}
+
+void mainDisplay()
+{
+  if(currentDisplay != displayMain) { return; }
+  
+  lcd.setCursor(0,0);
+  lcd.print("Main display   ");
+}
+
 void displaySwitch()
 {
+  //if(lcd_key == btnSELECT) { return; }
  lcd_key = read_LCD_buttons();
 
  switch (lcd_key)               // depending on which button was pushed, we perform an action
@@ -135,6 +167,8 @@ void displaySwitch()
      }
    case btnSELECT:
      {
+      currentDisplay++;
+      if(currentDisplay > 2) { currentDisplay = 0; }
      break;
      }
      case btnNONE:
@@ -144,12 +178,19 @@ void displaySwitch()
  }
 }
 
+void count_pulse()
+{
+  pulse++;
+}
+
 void setup()
 {
  lcd.begin(16, 2);              // start the library
 
  pinMode(relayPin, OUTPUT);
- 
+ pinMode(waterFlowPin, INPUT);
+
+ attachInterrupt(digitalPinToInterrupt(waterFlowPin), count_pulse, RISING);
  /*Serial.begin(9600);*/
  }
  
@@ -159,8 +200,9 @@ void loop()
  Serial.print(photocellReading);*/
  displaySwitch(); //detects pressed key
 
+ mainDisplay();
  lightDisplay(); //configuring light
- 
+ waterDisplay(); //configuring water
  ledSwitch(); //final led action
 }
 
