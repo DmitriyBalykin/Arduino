@@ -12,7 +12,7 @@ Mark Bramwell, July 2010
 LiquidCrystal lcd(8, 9, 4, 5, 6, 7);
 
 // define some values used by the panel and buttons
-int lcd_key     = 0;
+//int lcd_key     = 0;
 int adc_key_in  = 0;
 #define btnRIGHT  0
 #define btnUP     1
@@ -31,27 +31,36 @@ int adc_key_in  = 0;
 #define setWater       3
 
 #define displayMain 0
-#define displayLight 1
-#define displayWater 2
-
-#define setNothing -1
-#define setLow 0
-#define setHigh 1
+#define displayTime 1
+#define displayLowLight 2
+#define displayHighLight 3
+#define displayWater 4
 
 int photocellPin = 1;
-int photocellReading;
+
 int relayPin = 2;
 int waterFlowPin = 3;
+
 bool ledOn = false;
 int currentBrightness = 0;
-int lightLowThres = 700;
-int lightHighThres = 800;
+int lightLevel;
+int lightLowThresOff = 300;
+int lightLowThresOn = 350;
+int lightHighThresOn = 700;
+int lightHighThresOff = 800;
 
-int currentMode = 0;
 int currentDisplay = 0;
-int currentSet = 0;
+int valueSet = 0;
+int valueDelta = 0;
+bool displayChanged = false;
+
 int total_pulses = 0;
 volatile int pulse;
+
+int second = 0;
+int minute = 0;
+int hour = 0;
+bool useTimer = false;
 
 // read the buttons
 int read_LCD_buttons()
@@ -70,48 +79,73 @@ int read_LCD_buttons()
 void ledSwitch()
 {
   /*lcd.setCursor(0,1);*/
- photocellReading = analogRead(photocellPin);
- if(photocellReading > lightHighThres) { ledOn = false; }
- if(photocellReading < lightLowThres) { ledOn = true; }
+ lightLevel = analogRead(photocellPin);
+  if((!useTimer || lightLevel >= lightLowThresOn) && lightLevel <= lightHighThresOn) { ledOn = true; }
+  else if((useTimer && lightLevel < lightLowThresOff)|| lightLevel > lightHighThresOff) { ledOn = false; }  
   
  if(ledOn) { digitalWrite(relayPin, LOW);}
  else { digitalWrite(relayPin, HIGH);}
-
- 
 }
 
 void lightDisplay()
 {
-  if(currentDisplay != displayLight) { return; }
-  
+  if(currentDisplay != displayHighLight || currentDisplay != displayLowLight) { return; }
+
   lcd.setCursor(0,0);
-  if(currentSet == setLow){
-    lcd.print("Low>");
-    if(lcd_key == btnUP) { lightLowThres++; }
-    if(lcd_key == btnDOWN) { lightLowThres--; }
+  if(currentDisplay == displayLowLight)
+  {
+    lcd.print("High");
   }
-  else {
-    lcd.print("Low ");
+  else
+  {
+    lcd.print("Low");
   }
-  lcd.setCursor(4,0);
-  lcd.print(lightLowThres);
-
-  lcd.setCursor(8,0);
-  if(currentSet == setHigh){
-    lcd.print("High>");
-    if(lcd_key == btnUP) { lightHighThres++; }
-    if(lcd_key == btnDOWN) { lightHighThres--; }
-  }
-  else {
-    lcd.print("High ");
-  }
-  lcd.setCursor(13,0);
-  lcd.print(lightHighThres);
-
+  lcd.print(". Level:");lcd.print(lightLevel);lcd.print("   ");
+    
   lcd.setCursor(0,1);
-  lcd.print("Light:");
-  lcd.setCursor(7,1);
-  lcd.print(photocellReading);
+  lcd.print("Off");
+  if(valueSet == 1){
+    lcd.print(">");
+    if(currentDisplay == displayLowLight)
+    {
+      lightLowThresOff += valueDelta;
+    }
+    else
+    {
+      lightHighThresOff += valueDelta;
+    }
+  }
+
+  if(currentDisplay == displayLowLight)
+  {
+    lcd.print(lightLowThresOff);
+  }
+  else
+  {
+    lcd.print(lightHighThresOff);
+  }
+
+  lcd.print(" On");
+  if(valueSet == 0){
+    lcd.print(">");
+    if(currentDisplay == displayLowLight)
+    {
+      lightLowThresOn += valueDelta;
+    }
+    else
+    {
+      lightHighThresOn += valueDelta;
+    }
+  }
+  if(currentDisplay == displayLowLight)
+  {
+    lcd.print(lightLowThresOn);
+  }
+  else
+  {
+    lcd.print(lightHighThresOn);
+  }
+  lcd.print("   ");
 }
 
 void waterDisplay()
@@ -137,43 +171,76 @@ void mainDisplay()
   if(currentDisplay != displayMain) { return; }
   
   lcd.setCursor(0,0);
-  lcd.print("Main display   ");
+  lcd.print("Main display    ");
+  lcd.setCursor(0,1);
+  lcd.print("Privet!         ");
+}
+
+void timeDisplay()
+{
+  if(currentDisplay != displayTime) { return; }
+  
+  lcd.setCursor(0,0);
+  lcd.print("Time: ");
+  lcd.print(hour);
+  lcd.print(":");
+  lcd.print(minute);
+  lcd.print(":");
+  lcd.print(second);
+  lcd.print("   ");
+  
+  lcd.setCursor(0,1);
+  lcd.print("Use timer? ");
+  if(useTimer){ lcd.print("Yes"); } else { lcd.print("No"); }
+}
+
+void timeSet()
+{
+  if(millis()%1000 != 0) return;
+  second = 60*millis()%(1000*60);
+  minute = 60*60*millis()%(1000*60*60);
+  hour = 24*60*60*millis()%(1000*60*60*24);
 }
 
 void displaySwitch()
 {
-  //if(lcd_key == btnSELECT) { return; }
- lcd_key = read_LCD_buttons();
+ int lcd_key = read_LCD_buttons();
 
  switch (lcd_key)               // depending on which button was pushed, we perform an action
  {
    case btnRIGHT:
      {
-      currentSet = setHigh;
-     break;
+      valueSet++;
+      break;
      }
    case btnLEFT:
      {
-      currentSet = setLow;
-     break;
+      valueSet--;
+      break;
      }
    case btnUP:
      {
-     break;
+      valueDelta = 1;
+      break;
      }
    case btnDOWN:
      {
-     break;
+      valueDelta = -1;
+      break;
      }
    case btnSELECT:
      {
+      if(displayChanged) { break; }
+      displayChanged = true;
       currentDisplay++;
-      if(currentDisplay > 2) { currentDisplay = 0; }
+      if(currentDisplay > 4) { currentDisplay = 0; }
      break;
      }
      case btnNONE:
      {
-     break;
+      displayChanged = false;
+      valueDelta = 0;
+      break;
      }
  }
 }
@@ -199,10 +266,12 @@ void loop()
  /*Serial.print("Analog reading = ");
  Serial.print(photocellReading);*/
  displaySwitch(); //detects pressed key
+ timeSet();
 
  mainDisplay();
  lightDisplay(); //configuring light
  waterDisplay(); //configuring water
+ timeDisplay(); //configuring time
  ledSwitch(); //final led action
 }
 
