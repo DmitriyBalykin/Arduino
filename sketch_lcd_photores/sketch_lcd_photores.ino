@@ -61,6 +61,7 @@ int second = 0;
 int minute = 0;
 int hour = 0;
 bool useTimer = false;
+unsigned long secondsShift = 0;
 
 // read the buttons
 int read_LCD_buttons()
@@ -78,7 +79,6 @@ int read_LCD_buttons()
 
 void ledSwitch()
 {
-  /*lcd.setCursor(0,1);*/
  lightLevel = analogRead(photocellPin);
   if((!useTimer || lightLevel >= lightLowThresOn) && lightLevel <= lightHighThresOn) { ledOn = true; }
   else if((useTimer && lightLevel < lightLowThresOff)|| lightLevel > lightHighThresOff) { ledOn = false; }  
@@ -89,22 +89,26 @@ void ledSwitch()
 
 void lightDisplay()
 {
-  if(currentDisplay != displayHighLight || currentDisplay != displayLowLight) { return; }
+  if(currentDisplay != displayHighLight && currentDisplay != displayLowLight) { return; }
 
+  Serial.print("Show light display: ");
   lcd.setCursor(0,0);
   if(currentDisplay == displayLowLight)
   {
-    lcd.print("High");
+    lcd.print("Low");
+    Serial.println("Low");
   }
   else
   {
-    lcd.print("Low");
+    lcd.print("High");
+    Serial.println("High");
   }
   lcd.print(". Level:");lcd.print(lightLevel);lcd.print("   ");
     
   lcd.setCursor(0,1);
   lcd.print("Off");
-  if(valueSet == 1){
+  if(valueSet <= 0){
+    valueSet = 0;
     lcd.print(">");
     if(currentDisplay == displayLowLight)
     {
@@ -126,7 +130,8 @@ void lightDisplay()
   }
 
   lcd.print(" On");
-  if(valueSet == 0){
+  if(valueSet >= 1){
+    valueSet = 1;
     lcd.print(">");
     if(currentDisplay == displayLowLight)
     {
@@ -151,24 +156,39 @@ void lightDisplay()
 void waterDisplay()
 {
   if(currentDisplay != displayWater) { return; }
+  Serial.println("Show water display");
 
-  pulse = 0;
-
-  interrupts();
-  delay(1000);
-  noInterrupts();
-  total_pulses += pulse;
   lcd.setCursor(0,0);
   lcd.print("Water flow      ");
   lcd.setCursor(0,1);
   lcd.print("Total: ");
-  lcd.print(total_pulses/450);
-  lcd.print("   L");
+
+  
+  pulse = 0;
+
+  //interrupts();
+  delay(1000);
+  //noInterrupts();
+  total_pulses += pulse;
+  
+  Serial.print("Pulse count: ");
+  Serial.println(pulse);
+
+  int milliliters = total_pulses*7.5;
+  int partMilli = milliliters%1000;
+  lcd.print(milliliters/1000);
+  lcd.print(".");
+  if(partMilli < 10){lcd.print("00");}
+  else if(partMilli < 100){lcd.print("0");}
+  lcd.print(partMilli);
+  lcd.print(" L     ");
 }
 
 void mainDisplay()
 {
   if(currentDisplay != displayMain) { return; }
+
+  Serial.println("Show main display");
   
   lcd.setCursor(0,0);
   lcd.print("Main display    ");
@@ -179,15 +199,22 @@ void mainDisplay()
 void timeDisplay()
 {
   if(currentDisplay != displayTime) { return; }
+  if(valueSet < 0){ valueSet = 0; }
+  if(valueSet > 3){ valueSet = 3; }
+  
+  Serial.println("Show time display");
   
   lcd.setCursor(0,0);
   lcd.print("Time: ");
+  if(hour < 10) lcd.print("0");
   lcd.print(hour);
   lcd.print(":");
+  if(minute < 10) lcd.print("0");
   lcd.print(minute);
   lcd.print(":");
+  if(second < 10) lcd.print("0");
   lcd.print(second);
-  lcd.print("   ");
+  lcd.print(" ");
   
   lcd.setCursor(0,1);
   lcd.print("Use timer? ");
@@ -196,10 +223,14 @@ void timeDisplay()
 
 void timeSet()
 {
-  if(millis()%1000 != 0) return;
-  second = 60*millis()%(1000*60);
-  minute = 60*60*millis()%(1000*60*60);
-  hour = 24*60*60*millis()%(1000*60*60*24);
+  unsigned long seconds = millis()/1000 + secondsShift;
+  Serial.print("Milliseconds: ");
+  Serial.print(millis());
+  Serial.print("  Shift: ");
+  Serial.println(secondsShift);
+  second = seconds % 60;
+  minute = (seconds / 60) % (60*60);
+  hour = (seconds / (60*24))%(60*60*24);
 }
 
 void displaySwitch()
@@ -232,9 +263,11 @@ void displaySwitch()
      {
       if(displayChanged) { break; }
       displayChanged = true;
+      Serial.print("Change display to: ");
       currentDisplay++;
       if(currentDisplay > 4) { currentDisplay = 0; }
-     break;
+      Serial.println(currentDisplay);
+      break;
      }
      case btnNONE:
      {
@@ -258,7 +291,7 @@ void setup()
  pinMode(waterFlowPin, INPUT);
 
  attachInterrupt(digitalPinToInterrupt(waterFlowPin), count_pulse, RISING);
- /*Serial.begin(9600);*/
+ Serial.begin(9600);
  }
  
 void loop()
