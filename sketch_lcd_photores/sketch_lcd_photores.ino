@@ -32,39 +32,48 @@ int adc_key_in  = 0;
 
 #define displayMain 0
 #define displayTime 1
-#define displayLowLight 2
-#define displayHighLight 3
-#define displayWater 4
+#define displayTimer 2
+#define displayLowLight 3
+#define displayHighLight 4
+#define displayWater 5
+#define displayStat 6
 
-int photocellPin = 1;
+byte photocellPin = 1;
 
-int relayPin = 2;
-int waterFlowPin = 3;
+byte relayPin = 2;
+byte waterFlowPin = 3;
 
 bool ledOn = false;
-int currentBrightness = 0;
-int lightLevel;
-int lightLowThresOff = 300;
-int lightLowThresOn = 350;
-int lightHighThresOn = 700;
-int lightHighThresOff = 800;
+short currentBrightness = 0;
+short lightLevel;
+short lightLowThresOff = 470;
+short lightLowThresOn = 500;
+short lightHighThresOn = 100;
+short lightHighThresOff = 1050;
 
-int currentDisplay = 0;
-int valueSet = 0;
-int valueDelta = 0;
-bool displayChanged = false;
+byte currentDisplay = 0;
+byte valueSet = 0;
+short valueDelta = 0;
+bool buttonPressed = false;
 
 int total_pulses = 0;
 volatile int pulse;
 
-int second = 0;
-int minute = 0;
-int hour = 0;
-bool useTimer = false;
+byte second = 0;
+byte minute = 0;
+byte hour = 0;
 unsigned long secondsShift = 0;
+bool interruptValueSet = false;
+
+bool useTimer = false;
+short timerMinuteOn = 8*60;
+short timerMinuteOff = 21*60;
+
+unsigned int ledOnSeconds = 0;
+unsigned int ledOnIntervalSeconds = 0;
 
 // read the buttons
-int read_LCD_buttons()
+short read_LCD_buttons()
 {
  adc_key_in = analogRead(0);      // read the value from the sensor 
  if (adc_key_in > 1000) return btnNONE; // We make this the 1st option for speed reasons since it will be the most likely result
@@ -77,31 +86,48 @@ int read_LCD_buttons()
  return btnNONE;  // when all others fail, return this...
 }
 
-void ledSwitch()
-{
- lightLevel = analogRead(photocellPin);
-  if((!useTimer || lightLevel >= lightLowThresOn) && lightLevel <= lightHighThresOn) { ledOn = true; }
-  else if((useTimer && lightLevel < lightLowThresOff)|| lightLevel > lightHighThresOff) { ledOn = false; }  
-  
- if(ledOn) { digitalWrite(relayPin, LOW);}
- else { digitalWrite(relayPin, HIGH);}
+void ledSwitch() {
+  lightLevel = analogRead(photocellPin);
+  bool ledOnOld = ledOn;
+  if(useTimer) {
+    short timeMinutes = hour*60 + minute;
+    if(timeMinutes >= timerMinuteOn && timeMinutes < timerMinuteOff) { ledOn = true; }
+    if(timeMinutes < timerMinuteOn || timeMinutes >= timerMinuteOff) { ledOn = false; }
+    if(lightLevel > lightHighThresOff) { ledOn = false; }
+  }
+  else {
+    if(lightLevel >= lightLowThresOn && lightLevel <= lightHighThresOn) { ledOn = true; }
+    else if(lightLevel < lightLowThresOff || lightLevel > lightHighThresOff) { ledOn = false; }
+  }
+  if(ledOn) {
+    digitalWrite(relayPin, LOW);
+    //Serial.println("LED On");
+    if(!ledOnOld) {
+      ledOnIntervalSeconds = millis()/1000;
+    }
+  }
+  else {
+    digitalWrite(relayPin, HIGH);
+    //Serial.println("LED Off");
+    if(!ledOnOld) {
+      ledOnSeconds += millis()/1000 - ledOnIntervalSeconds;
+    }
+  }
 }
 
-void lightDisplay()
-{
+void lightDisplay() {
   if(currentDisplay != displayHighLight && currentDisplay != displayLowLight) { return; }
-
-  Serial.print("Show light display: ");
+  interruptValueSet = false;
+  
+  //Serial.print("Show light display: ");
   lcd.setCursor(0,0);
-  if(currentDisplay == displayLowLight)
-  {
+  if(currentDisplay == displayLowLight) {
     lcd.print("Low");
-    Serial.println("Low");
+    //Serial.println("Low");
   }
-  else
-  {
+  else {
     lcd.print("High");
-    Serial.println("High");
+    //Serial.println("High");
   }
   lcd.print(". Level:");lcd.print(lightLevel);lcd.print("   ");
     
@@ -110,22 +136,18 @@ void lightDisplay()
   if(valueSet <= 0){
     valueSet = 0;
     lcd.print(">");
-    if(currentDisplay == displayLowLight)
-    {
+    if(currentDisplay == displayLowLight) {
       lightLowThresOff += valueDelta;
     }
-    else
-    {
+    else {
       lightHighThresOff += valueDelta;
     }
   }
 
-  if(currentDisplay == displayLowLight)
-  {
+  if(currentDisplay == displayLowLight) {
     lcd.print(lightLowThresOff);
   }
-  else
-  {
+  else {
     lcd.print(lightHighThresOff);
   }
 
@@ -133,46 +155,37 @@ void lightDisplay()
   if(valueSet >= 1){
     valueSet = 1;
     lcd.print(">");
-    if(currentDisplay == displayLowLight)
-    {
+    if(currentDisplay == displayLowLight) {
       lightLowThresOn += valueDelta;
     }
-    else
-    {
+    else {
       lightHighThresOn += valueDelta;
     }
   }
-  if(currentDisplay == displayLowLight)
-  {
+  if(currentDisplay == displayLowLight) {
     lcd.print(lightLowThresOn);
   }
-  else
-  {
+  else {
     lcd.print(lightHighThresOn);
   }
-  lcd.print("   ");
+  lcd.print("  ");
+  //EEPROM.write(lightLowThresOff, ); //save only if value changed
+  //EEPROM.write(lightHighThresOff, ); //save only if value changed
+  //EEPROM.write(lightLowThresOn, ); //save only if value changed
+  //EEPROM.write(lightHighThresOn, ); //save only if value changed
 }
 
-void waterDisplay()
-{
+void waterDisplay() {
   if(currentDisplay != displayWater) { return; }
-  Serial.println("Show water display");
 
   lcd.setCursor(0,0);
   lcd.print("Water flow      ");
   lcd.setCursor(0,1);
   lcd.print("Total: ");
-
   
   pulse = 0;
-
-  //interrupts();
   delay(1000);
-  //noInterrupts();
   total_pulses += pulse;
-  
-  Serial.print("Pulse count: ");
-  Serial.println(pulse);
 
   int milliliters = total_pulses*7.5;
   int partMilli = milliliters%1000;
@@ -184,11 +197,8 @@ void waterDisplay()
   lcd.print(" L     ");
 }
 
-void mainDisplay()
-{
+void mainDisplay() {
   if(currentDisplay != displayMain) { return; }
-
-  Serial.println("Show main display");
   
   lcd.setCursor(0,0);
   lcd.print("Main display    ");
@@ -196,116 +206,216 @@ void mainDisplay()
   lcd.print("Privet!         ");
 }
 
-void timeDisplay()
-{
+void timeDisplay() {
   if(currentDisplay != displayTime) { return; }
+  interruptValueSet = true;
+  
   if(valueSet < 0){ valueSet = 0; }
   if(valueSet > 3){ valueSet = 3; }
   
-  Serial.println("Show time display");
-  
   lcd.setCursor(0,0);
-  lcd.print("Time: ");
+  lcd.print("Time:");
+  if(valueDelta == -1) { secondsShift += 86400; }
+  if(valueSet == 0) {
+    lcd.print(">");
+    secondsShift += valueDelta*3600;
+  }
+  else { lcd.print(" "); }
+    
   if(hour < 10) lcd.print("0");
   lcd.print(hour);
-  lcd.print(":");
+  if(valueSet == 1) {
+    secondsShift+= valueDelta*60;
+    lcd.print(">");
+  }
+  else { lcd.print(":"); }
+  
   if(minute < 10) lcd.print("0");
   lcd.print(minute);
-  lcd.print(":");
+  if(valueSet == 2) {
+    secondsShift+= valueDelta;
+    lcd.print(">"); 
+  }
+  else { lcd.print(":"); }
+  
   if(second < 10) lcd.print("0");
   lcd.print(second);
   lcd.print(" ");
   
   lcd.setCursor(0,1);
-  lcd.print("Use timer? ");
-  if(useTimer){ lcd.print("Yes"); } else { lcd.print("No"); }
+  lcd.print("Use timer?");
+  if(valueSet == 3) {
+    if(valueDelta > 0) { useTimer = true; }
+    else if(valueDelta < 0) { useTimer = false; }
+    lcd.print(">");
+  }
+  else { lcd.print(" "); }
+  
+  secondsShift %= 86400;
+  //EEPROM.write(secondsShift, ); //save only if value changed
+  if(useTimer){ lcd.print("Yes"); } else { lcd.print("No "); }
 }
 
-void timeSet()
-{
+void timerDisplay() {
+  if(currentDisplay != displayTimer) { return; }
+  if(valueSet < 0){ valueSet = 0; }
+  if(valueSet > 3){ valueSet = 3; }
+  
+  lcd.setCursor(0,0);
+  lcd.print("On time:");
+  if(valueSet == 0) {
+    lcd.print(">");
+    timerMinuteOn += valueDelta*60;
+  }
+  else {
+    lcd.print(" ");
+  }
+  byte timerHourOn = (timerMinuteOn/60)%24;
+  if(timerHourOn < 10) lcd.print("0");
+  lcd.print(timerHourOn);
+  if(valueSet == 1) {
+    lcd.print(">");
+    timerMinuteOn += valueDelta;
+  }
+  else {
+    lcd.print(":");
+  }
+  if(timerMinuteOn%60 < 10) lcd.print("0");
+  lcd.print(timerMinuteOn%60);
+  lcd.print("     ");
+  
+  lcd.setCursor(0,1);
+  lcd.print("Off time:");
+  if(valueSet == 2) {
+    lcd.print(">");
+    timerMinuteOff += valueDelta*60;
+  }
+  else {
+    lcd.print(" ");
+  }
+  byte timerHourOff = (timerMinuteOff/60)%24;
+  if(timerHourOff < 10) lcd.print("0");
+  lcd.print(timerHourOff);
+  if(valueSet == 3) {
+    lcd.print(">");
+    timerMinuteOff += valueDelta;
+  }
+  else {
+    lcd.print(":");
+  }
+  if(timerMinuteOff%60 < 10) lcd.print("0");
+  lcd.print(timerMinuteOff%60);
+  lcd.print("     ");
+
+  //EEPROM.write(timerMinuteOn, ); //save only if value changed
+  //EEPROM.write(timerMinuteOff, ); //save only if value changed
+}
+
+void statDisplay() {
+  if(currentDisplay != displayStat) { return; }
+  interruptValueSet = true;
+  
+  lcd.setCursor(0,0);
+  byte ledOnSecondsToTime = ledOnSeconds %60;
+  byte ledOnMinutes = (ledOnSeconds / 60) % 60;
+  byte ledOnHours = (ledOnSeconds / 3600) % 24;
+  lcd.print("Led on: "); lcd.print(ledOnHoursRound);
+  lcd.print(":");if(ledOnMinutes < 10 ){ lcd.print("0"); } lcd.print(ledOnMinutes);
+  lcd.print(":");if(ledOnSecondsToTime < 10 ){ lcd.print("0"); } lcd.print(ledOnSecondsToTime);
+  lcd.setCursor(0,1);
+  lcd.print("Press UP to reset.");
+  if(valueDelta > 0){
+    ledOnSeconds = 0;
+  }
+}
+
+void timeSet() {
+  
   unsigned long seconds = millis()/1000 + secondsShift;
-  Serial.print("Milliseconds: ");
-  Serial.print(millis());
-  Serial.print("  Shift: ");
-  Serial.println(secondsShift);
   second = seconds % 60;
-  minute = (seconds / 60) % (60*60);
-  hour = (seconds / (60*24))%(60*60*24);
+  minute = (seconds / 60) % 60;
+  hour = (seconds / 3600) % 24;
 }
 
-void displaySwitch()
-{
- int lcd_key = read_LCD_buttons();
-
+void displaySwitch() {
+  int lcd_key = read_LCD_buttons();
+  if(interruptValueSet){ valueDelta = 0; interruptValueSet = false; }
+  
  switch (lcd_key)               // depending on which button was pushed, we perform an action
  {
    case btnRIGHT:
      {
+      if(buttonPressed) {break;}
       valueSet++;
+      buttonPressed = true;
       break;
      }
    case btnLEFT:
      {
+      if(buttonPressed) {break;}
       valueSet--;
+      buttonPressed = true;
       break;
      }
    case btnUP:
      {
+      if(buttonPressed) { break; }
+      buttonPressed = true;
       valueDelta = 1;
       break;
      }
    case btnDOWN:
      {
+      if(buttonPressed) { break; }
+      buttonPressed = true;
       valueDelta = -1;
       break;
      }
    case btnSELECT:
      {
-      if(displayChanged) { break; }
-      displayChanged = true;
-      Serial.print("Change display to: ");
+      if(buttonPressed) { break; }
+      buttonPressed = true;
+      //Serial.print("Change display to: ");
       currentDisplay++;
-      if(currentDisplay > 4) { currentDisplay = 0; }
-      Serial.println(currentDisplay);
+      valueSet = 0;
+      if(currentDisplay > 6) { currentDisplay = 0; }
+      //Serial.println(currentDisplay);
       break;
      }
      case btnNONE:
      {
-      displayChanged = false;
+      buttonPressed = false;
       valueDelta = 0;
       break;
      }
  }
 }
 
-void count_pulse()
-{
+void count_pulse() {
   pulse++;
 }
 
-void setup()
-{
+void setup() {
  lcd.begin(16, 2);              // start the library
 
  pinMode(relayPin, OUTPUT);
  pinMode(waterFlowPin, INPUT);
 
  attachInterrupt(digitalPinToInterrupt(waterFlowPin), count_pulse, RISING);
- Serial.begin(9600);
+ //Serial.begin(9600);
  }
  
-void loop()
-{
+void loop() {
  /*Serial.print("Analog reading = ");
  Serial.print(photocellReading);*/
  displaySwitch(); //detects pressed key
  timeSet();
-
+ 
  mainDisplay();
  lightDisplay(); //configuring light
  waterDisplay(); //configuring water
  timeDisplay(); //configuring time
+ timerDisplay(); //configuring timer
+ statDisplay(); //configuring timer
  ledSwitch(); //final led action
 }
-
-
